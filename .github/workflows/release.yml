@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Date-only (ha4o-YYYYMMDD) or date + UTC time-of-day (ha4o-YYYYMMDD-HHmm),
+      # mirroring R1HA so same-day reships get strictly distinct versions.
+      - 'ha4o-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+      - 'ha4o-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse version from tag
+        id: version
+        run: |
+          # Tag forms: ha4o-YYYYMMDD or ha4o-YYYYMMDD-HHmm. versionCode is
+          # minutes-since-2020-01-01-UTC plus a 100M floor (strictly monotonic so
+          # any reship upgrades cleanly); versionName is YYYY.MM.DD.HHmm.
+          TAG="${GITHUB_REF_NAME}"
+          REST="${TAG#ha4o-}"
+          YYYYMMDD="${REST:0:8}"
+          if [ "${#REST}" -ge 13 ] && [ "${REST:8:1}" = "-" ]; then
+            HHMM="${REST:9:4}"
+          else
+            HHMM="0000"
+          fi
+          YYYY="${YYYYMMDD:0:4}"; MM="${YYYYMMDD:4:2}"; DD="${YYYYMMDD:6:2}"
+          HH="${HHMM:0:2}"; MIN="${HHMM:2:2}"
+          EPOCH_S=$(date -u -d '2020-01-01 00:00:00' +%s)
+          TAG_S=$(date -u -d "${YYYY}-${MM}-${DD} ${HH}:${MIN}:00" +%s)
+          MINUTES=$(( (TAG_S - EPOCH_S) / 60 ))
+          VERSION_CODE=$(( 100000000 + MINUTES ))
+          VERSION_NAME="${YYYY}.${MM}.${DD}.${HHMM}"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        env:
+          APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          APP_VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        # Release build signs with the committed debug.keystore (no release keystore
+        # is wired through local.properties in CI), so the signature stays consistent
+        # across tag builds and direct-install upgrades work without uninstalling.
+        run: ./gradlew :app:assembleRelease
+
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/release/app-release.apk \
+             "ha4o-${{ steps.version.outputs.version_name }}.apk"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | grep '^ha4o-' | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s")
+          else
+            NOTES=$(git log --pretty=format:"- %s")
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: false
+          files: |
+            ha4o-${{ steps.version.outputs.version_name }}.apk
