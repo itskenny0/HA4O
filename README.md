@@ -9,6 +9,7 @@ It is a companion to [R1HA](https://github.com/itskenny0/R1HA), not a port of it
 - Connects to your Home Assistant over the WebSocket API using a long-lived access token.
 - Lists every entity with its live state, updated in real time.
 - Tap an entity to toggle it (lights, switches, fans, input booleans, automations, humidifiers, sirens) or to fire a scene/script. Anything else opens a read-only attribute view.
+- Long-press an entity to favourite it (marked with a star), and use the menu to filter the list to favourites only, so you don't have to scroll the whole house.
 
 That is the whole app. No dashboards, history, energy, automations editor, cameras, voice, or settings beyond the connection. If you want those, use R1HA on a device that can run it.
 

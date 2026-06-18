@@ -25,6 +25,20 @@ class Prefs(context: Context) {
     val isConfigured: Boolean
         get() = !baseUrl.isNullOrEmpty() && !token.isNullOrEmpty()
 
+    /** Favourite entity ids. Stored as a newline-joined string (getStringSet is API 11). */
+    var favourites: Set<String>
+        get() = Favourites.decode(sp.getString(KEY_FAVS, null))
+        set(value) {
+            sp.edit().putString(KEY_FAVS, Favourites.encode(value)).commit()
+        }
+
+    /** Whether the list is currently filtered to favourites only. */
+    var showFavouritesOnly: Boolean
+        get() = sp.getBoolean(KEY_FAV_ONLY, false)
+        set(value) {
+            sp.edit().putBoolean(KEY_FAV_ONLY, value).commit()
+        }
+
     fun clear() {
         sp.edit().clear().commit()
     }
@@ -32,5 +46,7 @@ class Prefs(context: Context) {
     companion object {
         private const val KEY_URL = "base_url"
         private const val KEY_TOKEN = "token"
+        private const val KEY_FAVS = "favourites"
+        private const val KEY_FAV_ONLY = "fav_only"
     }
 }

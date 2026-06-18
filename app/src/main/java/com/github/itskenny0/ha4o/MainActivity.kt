@@ -13,9 +13,10 @@ import android.widget.TextView
 import android.widget.Toast
 
 /**
- * The whole app, basically: connect to HA, show every entity in a scrolling list with
- * its live state, tap to toggle (or view attributes). Framework widgets only, built in
- * code. State updates arrive over the WebSocket and patch the list in place.
+ * The whole app, basically: connect to HA, show entities in a scrolling list with their
+ * live state, tap to toggle (or view attributes), long-press to favourite. A menu toggle
+ * filters the list to favourites only. Framework widgets only, built in code; state
+ * updates arrive over the WebSocket and patch the list in place.
  */
 class MainActivity : Activity(), HaSocket.Listener {
 
@@ -23,7 +24,11 @@ class MainActivity : Activity(), HaSocket.Listener {
     private lateinit var status: TextView
     private lateinit var listView: ListView
     private lateinit var adapter: EntityAdapter
-    private val entities = ArrayList<EntityState>()
+
+    private val allEntities = ArrayList<EntityState>()
+    private val displayed = ArrayList<EntityState>()
+    private val favourites = HashSet<String>()
+    private var showFavouritesOnly = false
     private var socket: HaSocket? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,6 +38,8 @@ class MainActivity : Activity(), HaSocket.Listener {
             goToOnboarding()
             return
         }
+        favourites.addAll(prefs.favourites)
+        showFavouritesOnly = prefs.showFavouritesOnly
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -44,9 +51,12 @@ class MainActivity : Activity(), HaSocket.Listener {
         root.addView(status, wrap())
 
         listView = ListView(this)
-        adapter = EntityAdapter(this, entities)
+        adapter = EntityAdapter(this, displayed, favourites)
         listView.adapter = adapter
-        listView.setOnItemClickListener { _, _, position, _ -> onEntityTapped(entities[position]) }
+        listView.setOnItemClickListener { _, _, position, _ -> onEntityTapped(displayed[position]) }
+        listView.setOnItemLongClickListener { _, _, position, _ ->
+            toggleFavourite(displayed[position]); true
+        }
         root.addView(listView, fill())
 
         setContentView(root)
@@ -76,6 +86,39 @@ class MainActivity : Activity(), HaSocket.Listener {
         }
     }
 
+    private fun toggleFavourite(entity: EntityState) {
+        val id = entity.entityId
+        val nowFav = if (favourites.contains(id)) {
+            favourites.remove(id); false
+        } else {
+            favourites.add(id); true
+        }
+        prefs.favourites = favourites
+        rebuildDisplayed()
+        toast(if (nowFav) "★ Favourited ${entity.displayName}" else "Removed ${entity.displayName}")
+    }
+
+    /** Recompute the visible list from [allEntities] given the current filter. */
+    private fun rebuildDisplayed() {
+        displayed.clear()
+        if (showFavouritesOnly) {
+            displayed.addAll(allEntities.filter { favourites.contains(it.entityId) })
+        } else {
+            displayed.addAll(allEntities)
+        }
+        adapter.notifyDataSetChanged()
+        updateStatus()
+    }
+
+    private fun updateStatus() {
+        status.text = when {
+            showFavouritesOnly && displayed.isEmpty() ->
+                "No favourites yet — long-press an entity to add one"
+            showFavouritesOnly -> "${displayed.size} favourites"
+            else -> "${displayed.size} entities — long-press to favourite"
+        }
+    }
+
     // --- HaSocket.Listener (all on the main thread) ---
 
     override fun onConnected() {
@@ -83,22 +126,21 @@ class MainActivity : Activity(), HaSocket.Listener {
     }
 
     override fun onStates(states: List<EntityState>) {
-        entities.clear()
-        entities.addAll(states)
+        allEntities.clear()
+        allEntities.addAll(states)
         sortEntities()
-        adapter.notifyDataSetChanged()
-        status.text = "${entities.size} entities"
+        rebuildDisplayed()
     }
 
     override fun onStateUpdate(entity: EntityState) {
-        val idx = entities.indexOfFirst { it.entityId == entity.entityId }
+        val idx = allEntities.indexOfFirst { it.entityId == entity.entityId }
         if (idx >= 0) {
-            entities[idx] = entity
+            allEntities[idx] = entity
         } else {
-            entities.add(entity)
+            allEntities.add(entity)
             sortEntities()
         }
-        adapter.notifyDataSetChanged()
+        rebuildDisplayed()
     }
 
     override fun onAuthFailed() {
@@ -114,13 +156,27 @@ class MainActivity : Activity(), HaSocket.Listener {
     // --- menu ---
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, MENU_RECONNECT, 0, "Reconnect")
-        menu.add(0, MENU_SIGN_OUT, 1, "Sign out")
+        menu.add(0, MENU_FAV_TOGGLE, 0, "Show favourites only")
+        menu.add(0, MENU_RECONNECT, 1, "Reconnect")
+        menu.add(0, MENU_SIGN_OUT, 2, "Sign out")
         return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        // invalidateOptionsMenu is API 11; onPrepareOptionsMenu (API 1) relabels instead.
+        menu.findItem(MENU_FAV_TOGGLE).title =
+            if (showFavouritesOnly) "Show all entities" else "Show favourites only"
+        return super.onPrepareOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
+            MENU_FAV_TOGGLE -> {
+                showFavouritesOnly = !showFavouritesOnly
+                prefs.showFavouritesOnly = showFavouritesOnly
+                rebuildDisplayed()
+                true
+            }
             MENU_RECONNECT -> { connect(); true }
             MENU_SIGN_OUT -> { prefs.clear(); goToOnboarding(); true }
             else -> super.onOptionsItemSelected(item)
@@ -134,7 +190,7 @@ class MainActivity : Activity(), HaSocket.Listener {
     }
 
     private fun sortEntities() =
-        entities.sortBy { it.displayName.lowercase() }
+        allEntities.sortBy { it.displayName.lowercase() }
 
     private fun goToOnboarding() {
         startActivity(Intent(this, OnboardingActivity::class.java))
@@ -152,7 +208,8 @@ class MainActivity : Activity(), HaSocket.Listener {
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
 
     companion object {
-        private const val MENU_RECONNECT = 1
-        private const val MENU_SIGN_OUT = 2
+        private const val MENU_FAV_TOGGLE = 1
+        private const val MENU_RECONNECT = 2
+        private const val MENU_SIGN_OUT = 3
     }
 }
