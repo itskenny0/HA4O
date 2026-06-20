@@ -50,16 +50,17 @@ object HaJson {
     private fun entityFromStateObject(obj: JSONObject): EntityState {
         val entityId = obj.optString("entity_id", "")
         val state = obj.optString("state", "")
+        val lastChanged = obj.optString("last_changed", "")
         val attrs = obj.optJSONObject("attributes")
-        val friendly = attrs?.optString("friendly_name", "") ?: ""
-        val sb = StringBuilder()
+        val attributes = LinkedHashMap<String, String>()
         if (attrs != null) {
             val keys = attrs.keys()
             while (keys.hasNext()) {
                 val k = keys.next()
-                sb.append(k).append(": ").append(attrs.opt(k)?.toString() ?: "").append('\n')
+                attributes[k] = attrs.opt(k)?.toString() ?: ""
             }
         }
-        return EntityState(entityId, state, friendly, sb.toString().trim())
+        val friendly = attributes["friendly_name"] ?: ""
+        return EntityState(entityId, state, friendly, attributes, lastChanged)
     }
 }

@@ -44,16 +44,26 @@ class HaSocket(private val listener: Listener) {
         ws = client.newWebSocket(request, SocketListener())
     }
 
-    /** Fire a service call for [entityId]; no-op if the domain isn't controllable. */
-    fun callService(entityId: String) {
-        val call = Domains.serviceFor(entityId) ?: return
+    /** Send a service call, optionally with extra service data (e.g. brightness_pct). */
+    fun callService(domain: String, service: String, entityId: String, data: JSONObject? = null) {
         val msg = JSONObject()
             .put("id", nextId.getAndIncrement())
             .put("type", "call_service")
-            .put("domain", call.domain)
-            .put("service", call.service)
+            .put("domain", domain)
+            .put("service", service)
             .put("target", JSONObject().put("entity_id", entityId))
+        if (data != null) msg.put("service_data", data)
         ws?.send(msg.toString())
+    }
+
+    /** Convenience: send a [Controls.ServiceCall], converting its data map to JSON. */
+    fun callService(call: Controls.ServiceCall) {
+        val data = if (call.data.isEmpty()) {
+            null
+        } else {
+            JSONObject().also { for ((k, v) in call.data) it.put(k, v) }
+        }
+        callService(call.domain, call.service, call.entityId, data)
     }
 
     fun close() {

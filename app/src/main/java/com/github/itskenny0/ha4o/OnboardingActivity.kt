@@ -26,27 +26,32 @@ class OnboardingActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(BG)
         val pad = dp(16)
         root.setPadding(pad, pad, pad, pad)
 
         val title = TextView(this)
         title.text = "HA4O"
         title.textSize = 28f
+        title.setTextColor(ACCENT)
         root.addView(title)
 
         val hint = TextView(this)
         hint.text = "Home Assistant for old phones. Local network only (plain http://); " +
             "paste a long-lived access token from your HA profile."
+        hint.setTextColor(0xFF9E9E9E.toInt())
         root.addView(hint)
 
         val urlField = EditText(this)
         urlField.hint = "http://192.168.1.10:8123"
+        urlField.setTextColor(0xFFFFFFFF.toInt())
         urlField.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         urlField.setText(prefs.baseUrl ?: "http://")
         root.addView(urlField, fullWidth())
 
         val tokenField = EditText(this)
         tokenField.hint = "Long-lived access token"
+        tokenField.setTextColor(0xFFFFFFFF.toInt())
         tokenField.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
         prefs.token?.let { tokenField.setText(it) }
         root.addView(tokenField, fullWidth())
@@ -82,4 +87,9 @@ class OnboardingActivity : Activity() {
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        private val BG = 0xFF121212.toInt()
+        private val ACCENT = 0xFFFF6F00.toInt()
+    }
 }

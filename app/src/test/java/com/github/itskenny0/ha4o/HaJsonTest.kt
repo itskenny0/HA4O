@@ -49,4 +49,29 @@ class HaJsonTest {
         """.trimIndent()
         assertNull(HaJson.parseStateChangedEvent(msg))
     }
+
+    @Test fun keeps_structured_attributes_and_last_changed() {
+        val msg = """
+            {"id":1,"type":"result","success":true,"result":[
+              {"entity_id":"light.kitchen","state":"on","last_changed":"2026-06-20T10:00:00.000000+00:00",
+               "attributes":{"friendly_name":"Kitchen","brightness":200,"color_temp":370}}
+            ]}
+        """.trimIndent()
+        val e = HaJson.parseStatesResult(msg).single()
+        assertEquals("200", e.attributes["brightness"])
+        assertEquals("370", e.attributes["color_temp"])
+        assertEquals("Kitchen", e.attributes["friendly_name"])
+        assertEquals("2026-06-20T10:00:00.000000+00:00", e.lastChanged)
+    }
+
+    @Test fun attributes_text_is_derived_from_the_map_in_order() {
+        val e = EntityState(
+            entityId = "fan.office",
+            state = "on",
+            friendlyName = "Office",
+            attributes = linkedMapOf("friendly_name" to "Office", "percentage" to "66"),
+            lastChanged = "",
+        )
+        assertEquals("friendly_name: Office\npercentage: 66", e.attributesText)
+    }
 }
