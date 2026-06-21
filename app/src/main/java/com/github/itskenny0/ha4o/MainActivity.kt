@@ -53,7 +53,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private val displayed = ArrayList<EntityState>()
     private val finderItems = ArrayList<EntityState>()
     private val favourites = HashSet<String>()
-    private var selectedTab = ""
+    private var selectedTab = TabStrip.FAVOURITES_KEY
     private var finderMode = false
     private var socket: HaSocket? = null
 
@@ -222,9 +222,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private fun rebuild() {
         val tabs = buildTabs()
         if (tabs.none { it.key == selectedTab }) {
-            // Land on the first domain tab, never Favourites — that's reached via the ★
-            // button so a stale/persisted favourites set can't become the home screen.
-            selectedTab = (tabs.firstOrNull { it.key != TabStrip.FAVOURITES_KEY } ?: tabs.firstOrNull())?.key ?: ""
+            selectedTab = tabs.firstOrNull()?.key ?: ""
         }
         tabStrip.setTabs(tabs, selectedTab)
 
@@ -250,15 +248,39 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     }
 
     private fun showMenu() {
-        val items = arrayOf(if (finderMode) "Card view" else "All entities", "Reconnect", "Sign out")
+        val items = arrayOf(
+            if (finderMode) "Card view" else "All entities",
+            "Clear favourites",
+            "Reconnect",
+            "Sign out",
+        )
         AlertDialog.Builder(this)
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> { finderMode = !finderMode; rebuild() }
-                    1 -> connect()
-                    2 -> { prefs.clear(); goToOnboarding() }
+                    1 -> clearFavourites()
+                    2 -> connect()
+                    3 -> { prefs.clear(); goToOnboarding() }
                 }
             }
+            .show()
+    }
+
+    private fun clearFavourites() {
+        if (favourites.isEmpty()) {
+            toast("No favourites to clear")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Clear favourites?")
+            .setMessage("Remove all ${favourites.size} favourites?")
+            .setPositiveButton("Clear") { _, _ ->
+                favourites.clear()
+                prefs.favourites = favourites
+                rebuild()
+                toast("Favourites cleared")
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -398,8 +420,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_FINDER, 0, "All entities")
-        menu.add(0, MENU_RECONNECT, 1, "Reconnect")
-        menu.add(0, MENU_SIGN_OUT, 2, "Sign out")
+        menu.add(0, MENU_CLEAR_FAVS, 1, "Clear favourites")
+        menu.add(0, MENU_RECONNECT, 2, "Reconnect")
+        menu.add(0, MENU_SIGN_OUT, 3, "Sign out")
         return true
     }
 
@@ -411,6 +434,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_FINDER -> { finderMode = !finderMode; rebuild(); true }
+            MENU_CLEAR_FAVS -> { clearFavourites(); true }
             MENU_RECONNECT -> { connect(); true }
             MENU_SIGN_OUT -> { prefs.clear(); goToOnboarding(); true }
             else -> super.onOptionsItemSelected(item)
@@ -454,8 +478,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     companion object {
         private const val MENU_FINDER = 1
-        private const val MENU_RECONNECT = 2
-        private const val MENU_SIGN_OUT = 3
+        private const val MENU_CLEAR_FAVS = 2
+        private const val MENU_RECONNECT = 3
+        private const val MENU_SIGN_OUT = 4
         private const val STEP = 5
         private val BG = 0xFF121212.toInt()
     }
