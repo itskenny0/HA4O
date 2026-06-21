@@ -16,13 +16,31 @@ android {
         applicationId = "com.github.itskenny0.ha4o"
         // Android 2.3 Gingerbread. The whole point of HA4O.
         minSdk = 9
-        // Low targetSdk so newer Android runs the app in legacy-compat mode rather
-        // than applying runtime-permission / background restrictions this UI can't handle.
+        // Default (legacy flavor) targetSdk: low so newer Android runs the app in
+        // legacy-compat mode rather than applying runtime-permission / background
+        // restrictions this UI can't handle. The modern flavor raises it (see below).
         targetSdk = 10
         // Date-based versions matching the ha4o-YYYYMMDD[-HHmm] release tags. CI passes
         // APP_VERSION_CODE / APP_VERSION_NAME on tag builds; local builds use today's date.
         versionCode = (System.getenv("APP_VERSION_CODE") ?: defaultVersionCode()).toInt()
         versionName = System.getenv("APP_VERSION_NAME") ?: defaultVersionName()
+    }
+
+    // Two platform variants from one codebase:
+    //  - legacy: targetSdk 10, the Gingerbread-first build (unchanged).
+    //  - modern: targetSdk 35, so Android 14+ allows the install (it refuses APKs whose
+    //    targetSdk < 23). Same minSdk 9, so it still runs on everything; cleartext is
+    //    enabled in the manifest because the app speaks plain http/ws to a local HA.
+    flavorDimensions += "platform"
+    productFlavors {
+        create("legacy") {
+            dimension = "platform"
+        }
+        create("modern") {
+            dimension = "platform"
+            targetSdk = 35
+            versionNameSuffix = "-modern"
+        }
     }
 
     signingConfigs {

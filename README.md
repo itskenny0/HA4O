@@ -23,12 +23,21 @@ That is the whole app. No dashboards, history, energy, automations editor, camer
 
 JDK 17+ and an Android SDK with `platforms;android-35` / `build-tools;35.0.0`.
 
+There are two build flavors, both from the same code and `minSdk 9`:
+
+- **legacy** — `targetSdk 10`, the Gingerbread-first build.
+- **modern** — `targetSdk 35`, so Android 14+ allows the install (it refuses APKs whose `targetSdk` is below 23). It still runs everywhere down to API 9; cleartext HTTP is enabled in the manifest because the app only ever talks plain `http`/`ws` to a local HA.
+
 ```bash
-./gradlew :app:assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleLegacyDebug
+adb install app/build/outputs/apk/legacy/debug/app-legacy-debug.apk
+
+# or, to install on a current phone:
+./gradlew :app:assembleModernDebug
+adb install app/build/outputs/apk/modern/debug/app-modern-debug.apk
 ```
 
-The app targets `minSdk 9` / `targetSdk 10` and depends only on the framework, Kotlin, and okhttp 3.12. JSON is parsed with the built-in `org.json`. There is no AndroidX, no AppCompat, and no Compose, which is what keeps it runnable on Dalvik.
+Each tagged release publishes both: `ha4o-<version>.apk` (legacy) and `ha4o-<version>-modern.apk`. The app depends only on the framework, Kotlin, and okhttp 3.12. JSON is parsed with the built-in `org.json`. There is no AndroidX, no AppCompat, and no Compose, which is what keeps it runnable on Dalvik.
 
 ## Status
 

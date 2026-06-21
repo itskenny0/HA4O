@@ -53,19 +53,23 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build release APK
+      - name: Build release APKs
         env:
           APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
           APP_VERSION_NAME: ${{ steps.version.outputs.version_name }}
         # Release build signs with the committed debug.keystore (no release keystore
         # is wired through local.properties in CI), so the signature stays consistent
         # across tag builds and direct-install upgrades work without uninstalling.
-        run: ./gradlew :app:assembleRelease
+        # Two flavors: legacy (targetSdk 10, Gingerbread-first) and modern (targetSdk 35,
+        # so Android 14+ allows the install).
+        run: ./gradlew :app:assembleLegacyRelease :app:assembleModernRelease
 
-      - name: Rename APK
+      - name: Rename APKs
         run: |
-          mv app/build/outputs/apk/release/app-release.apk \
+          mv app/build/outputs/apk/legacy/release/app-legacy-release.apk \
              "ha4o-${{ steps.version.outputs.version_name }}.apk"
+          mv app/build/outputs/apk/modern/release/app-modern-release.apk \
+             "ha4o-${{ steps.version.outputs.version_name }}-modern.apk"
 
       - name: Generate release notes
         id: notes
@@ -90,3 +94,4 @@ jobs:
           prerelease: false
           files: |
             ha4o-${{ steps.version.outputs.version_name }}.apk
+            ha4o-${{ steps.version.outputs.version_name }}-modern.apk
