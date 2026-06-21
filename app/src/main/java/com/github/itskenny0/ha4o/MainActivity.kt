@@ -4,7 +4,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.KeyEvent
@@ -15,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AbsListView
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -38,6 +42,8 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private lateinit var content: FrameLayout
     private lateinit var cardList: ListView
     private lateinit var emptyState: TextView
+    private lateinit var finderPanel: LinearLayout
+    private lateinit var finderSearch: EditText
     private lateinit var finderList: ListView
     private lateinit var cardAdapter: CardAdapter
     private lateinit var finderAdapter: EntityAdapter
@@ -45,8 +51,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     private val allEntities = ArrayList<EntityState>()
     private val displayed = ArrayList<EntityState>()
+    private val finderItems = ArrayList<EntityState>()
     private val favourites = HashSet<String>()
-    private var selectedTab = TabStrip.FAVOURITES_KEY
+    private var selectedTab = ""
     private var finderMode = false
     private var socket: HaSocket? = null
 
@@ -77,7 +84,12 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
         cardAdapter = CardAdapter(this, displayed, favourites, this)
         cardList = ListView(this)
-        cardList.divider = null
+        // Uniform gaps via a transparent divider + list padding. ListView strips margins
+        // from item views, so spacing has to live here, not on the cards.
+        cardList.divider = ColorDrawable(Color.TRANSPARENT)
+        cardList.dividerHeight = dp(10)
+        cardList.setPadding(dp(8), dp(8), dp(8), dp(8))
+        cardList.clipToPadding = false
         cardList.adapter = cardAdapter
         cardList.setOnScrollListener(object : AbsListView.OnScrollListener {
             override fun onScrollStateChanged(view: AbsListView, state: Int) {}
@@ -92,13 +104,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         emptyState.visibility = View.GONE
         content.addView(emptyState, fill())
 
-        finderAdapter = EntityAdapter(this, allEntities, favourites)
-        finderList = ListView(this)
-        finderList.adapter = finderAdapter
-        finderList.setOnItemClickListener { _, _, p, _ -> onFinderTapped(allEntities[p]) }
-        finderList.setOnItemLongClickListener { _, _, p, _ -> toggleFavourite(allEntities[p]); true }
-        finderList.visibility = View.GONE
-        content.addView(finderList, fill())
+        content.addView(buildFinderPanel(), fill())
 
         root.addView(content, fill())
 
@@ -109,6 +115,51 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         return root
     }
 
+    /** The "All entities" finder: a search box above a filtered flat list. */
+    private fun buildFinderPanel(): View {
+        finderSearch = EditText(this)
+        finderSearch.hint = "Search entities"
+        finderSearch.setSingleLine(true)
+        finderSearch.setTextColor(Color.WHITE)
+        finderSearch.setHintTextColor(0xFF777777.toInt())
+        val p = dp(8)
+        finderSearch.setPadding(p, p, p, p)
+        finderSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) = applyFinderFilter()
+        })
+
+        finderAdapter = EntityAdapter(this, finderItems, favourites)
+        finderList = ListView(this)
+        finderList.adapter = finderAdapter
+        finderList.setOnItemClickListener { _, _, pos, _ -> onFinderTapped(finderItems[pos]) }
+        finderList.setOnItemLongClickListener { _, _, pos, _ -> toggleFavourite(finderItems[pos]); true }
+
+        finderPanel = LinearLayout(this)
+        finderPanel.orientation = LinearLayout.VERTICAL
+        finderPanel.visibility = View.GONE
+        finderPanel.addView(finderSearch, wrap())
+        finderPanel.addView(finderList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        return finderPanel
+    }
+
+    /** Refilter the finder list from the current search text. */
+    private fun applyFinderFilter() {
+        val q = finderSearch.text.toString().trim().lowercase()
+        finderItems.clear()
+        finderItems.addAll(
+            if (q.isEmpty()) {
+                allEntities
+            } else {
+                allEntities.filter {
+                    it.displayName.lowercase().contains(q) || it.entityId.lowercase().contains(q)
+                }
+            },
+        )
+        finderAdapter.notifyDataSetChanged()
+    }
+
     private fun topBar(): View {
         val bar = LinearLayout(this)
         bar.orientation = LinearLayout.HORIZONTAL
@@ -117,7 +168,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         val p = dp(8)
         bar.setPadding(p, p, p, p)
 
-        bar.addView(barButton("☰") { openOptionsMenu() }, wrap())
+        bar.addView(barButton("☰") { showMenu() }, wrap())
 
         title = TextView(this)
         title.setTextColor(Color.WHITE)
@@ -157,7 +208,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         }
         val tabs = ArrayList<TabStrip.Tab>()
         val favCount = allEntities.count { favourites.contains(it.entityId) }
-        if (favourites.isNotEmpty()) {
+        // The Favourites tab appears once there are favourites, or while it's the active
+        // tab (so the ★ button can land on it and show the empty state when there are none).
+        if (favourites.isNotEmpty() || selectedTab == TabStrip.FAVOURITES_KEY) {
             tabs.add(TabStrip.Tab(TabStrip.FAVOURITES_KEY, "★ FAVOURITES", favCount))
         }
         for (dom in counts.keys.sorted()) {
@@ -169,7 +222,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private fun rebuild() {
         val tabs = buildTabs()
         if (tabs.none { it.key == selectedTab }) {
-            selectedTab = tabs.firstOrNull()?.key ?: ""
+            // Land on the first domain tab, never Favourites — that's reached via the ★
+            // button so a stale/persisted favourites set can't become the home screen.
+            selectedTab = (tabs.firstOrNull { it.key != TabStrip.FAVOURITES_KEY } ?: tabs.firstOrNull())?.key ?: ""
         }
         tabStrip.setTabs(tabs, selectedTab)
 
@@ -182,16 +237,29 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             },
         )
         cardAdapter.notifyDataSetChanged()
-        finderAdapter.notifyDataSetChanged()
+        if (finderMode) applyFinderFilter()
         updateContentVisibility()
         updatePosition()
     }
 
     private fun updateContentVisibility() {
         val showEmpty = !finderMode && selectedTab == TabStrip.FAVOURITES_KEY && displayed.isEmpty()
-        finderList.visibility = if (finderMode) View.VISIBLE else View.GONE
+        finderPanel.visibility = if (finderMode) View.VISIBLE else View.GONE
         emptyState.visibility = if (showEmpty) View.VISIBLE else View.GONE
         cardList.visibility = if (!finderMode && !showEmpty) View.VISIBLE else View.GONE
+    }
+
+    private fun showMenu() {
+        val items = arrayOf(if (finderMode) "Card view" else "All entities", "Reconnect", "Sign out")
+        AlertDialog.Builder(this)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> { finderMode = !finderMode; rebuild() }
+                    1 -> connect()
+                    2 -> { prefs.clear(); goToOnboarding() }
+                }
+            }
+            .show()
     }
 
     private fun updatePosition() {

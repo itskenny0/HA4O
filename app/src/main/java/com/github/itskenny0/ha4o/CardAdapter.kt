@@ -47,11 +47,8 @@ class CardAdapter(
         card.orientation = LinearLayout.VERTICAL
         card.setPadding(pad(16), pad(16), pad(16), pad(16))
         card.setBackgroundDrawable(cardBackground(d))
-
-        // Spacing between stacked cards so the next one peeks below the current.
-        val lp = LinearLayout.LayoutParams(MATCH, WRAP)
-        lp.setMargins(pad(8), pad(8), pad(8), 0)
-        card.layoutParams = lp
+        // Inter-card spacing is the ListView's transparent divider; item-view margins are
+        // stripped by AbsListView, so they're not set here.
 
         card.addView(header(entity, d))
         card.addView(bigState(d))
