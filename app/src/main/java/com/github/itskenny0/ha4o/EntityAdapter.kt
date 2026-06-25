@@ -20,6 +20,8 @@ class EntityAdapter(
     private val items: List<EntityState>,
     /** Live reference to the favourite ids; favourited rows get a trailing star. */
     private val favourites: Set<String>,
+    private val style: Style,
+    private val customizations: Map<String, Customizations.Custom>,
 ) : BaseAdapter() {
 
     private val density = context.resources.displayMetrics.density
@@ -38,8 +40,12 @@ class EntityAdapter(
         row.setBackgroundColor(BG)
         row.setPadding(0, dp(2), dp(8), dp(2))
 
+        val custom = customizations[entity.entityId]
         val bar = View(context)
-        bar.setBackgroundColor(Palette.forDomain(d.domain, d.isOn).top)
+        bar.setBackgroundColor(
+            if (custom != null && custom.color != 0) custom.color
+            else Palette.forDomain(d.domain, d.isOn, style.paletteSet).top,
+        )
         row.addView(bar, LinearLayout.LayoutParams(dp(6), dp(40)))
 
         val labels = LinearLayout(context)
@@ -47,21 +53,22 @@ class EntityAdapter(
         labels.setPadding(dp(10), dp(6), dp(10), dp(6))
 
         val name = TextView(context)
-        name.text = entity.displayName
+        name.text = custom?.name?.ifEmpty { null } ?: entity.displayName
         name.setTextColor(Color.WHITE)
+        name.textSize = style.sp(16f)
         labels.addView(name)
 
         val state = TextView(context)
         state.text = d.displayState
         state.setTextColor(0xFF9E9E9E.toInt())
-        state.textSize = 12f
+        state.textSize = style.sp(12f)
         labels.addView(state)
         row.addView(labels, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         if (favourites.contains(entity.entityId)) {
             val star = TextView(context)
             star.text = "★"
-            star.setTextColor(0xFFFF6F00.toInt())
+            star.setTextColor(style.accent)
             row.addView(star, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         return row

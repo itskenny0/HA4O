@@ -42,12 +42,57 @@ class SettingsActivity : Activity() {
             ),
         )
 
+        col.addView(subheading("CARD PALETTE"))
+        col.addView(
+            choiceRow(
+                listOf("Vivid" to "vivid", "Pastel" to "pastel", "Neon" to "neon"),
+                current = { prefs.paletteSet },
+                onPick = { prefs.paletteSet = it },
+            ),
+        )
+
+        col.addView(subheading("ACCENT"))
+        col.addView(
+            choiceRow(
+                listOf("Warm" to "warm", "Cool" to "cool", "Green" to "green", "Neutral" to "neutral"),
+                current = { prefs.accent },
+                onPick = { prefs.accent = it },
+            ),
+        )
+
+        col.addView(subheading("TEXT SIZE"))
+        col.addView(
+            choiceRow(
+                listOf("S" to "compact", "M" to "default", "L" to "large", "XL" to "xlarge"),
+                current = { prefs.textSize },
+                onPick = { prefs.textSize = it },
+            ),
+        )
+
+        col.addView(subheading("DENSITY"))
+        col.addView(
+            choiceRow(
+                listOf("Comfortable" to "comfortable", "Compact" to "compact"),
+                current = { prefs.density },
+                onPick = { prefs.density = it },
+            ),
+        )
+
         col.addView(subheading("WHEEL STEP (%)"))
         col.addView(
             choiceRow(
                 listOf("1" to "1", "2" to "2", "5" to "5", "10" to "10"),
                 current = { prefs.wheelStep.toString() },
                 onPick = { prefs.wheelStep = it.toInt() },
+            ),
+        )
+
+        col.addView(subheading("WHEEL ACCELERATION"))
+        col.addView(
+            choiceRow(
+                listOf("On" to "true", "Off" to "false"),
+                current = { prefs.wheelAccel.toString() },
+                onPick = { prefs.wheelAccel = it.toBoolean() },
             ),
         )
 

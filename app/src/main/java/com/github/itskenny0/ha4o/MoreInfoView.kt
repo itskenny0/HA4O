@@ -19,7 +19,10 @@ import android.widget.TextView
 class MoreInfoView(
     context: Context,
     entity: EntityState,
+    style: Style,
+    customizations: Map<String, Customizations.Custom>,
     onCall: (Controls.ServiceCall) -> Unit,
+    onCustomize: () -> Unit,
     onClose: () -> Unit,
 ) {
 
@@ -36,11 +39,18 @@ class MoreInfoView(
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(pad(16), pad(16), pad(16), pad(16))
 
+        val custom = customizations[entity.entityId]
+        val name = custom?.name?.ifEmpty { null } ?: entity.displayName
+
         val titleRow = LinearLayout(context)
         titleRow.orientation = LinearLayout.HORIZONTAL
         titleRow.gravity = Gravity.CENTER_VERTICAL
-        val title = text(entity.displayName, 20f, Color.WHITE)
+        val title = text(name, style.sp(20f), Color.WHITE)
         titleRow.addView(title, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val customize = Button(context)
+        customize.text = "✎"
+        customize.setOnClickListener { onCustomize() }
+        titleRow.addView(customize, WRAP, WRAP)
         val close = Button(context)
         close.text = "×"
         close.setOnClickListener { onClose() }
@@ -48,16 +58,16 @@ class MoreInfoView(
         col.addView(titleRow, MATCH, WRAP)
 
         val d = Controls.describe(entity)
-        col.addView(text(d.displayState, 34f, Color.WHITE))
+        col.addView(text(d.displayState, style.sp(34f), Color.WHITE))
         val age = RelativeTime.format(entity.lastChanged, System.currentTimeMillis())
-        if (age.isNotEmpty()) col.addView(text(age, 12f, 0xFF9E9E9E.toInt()))
+        if (age.isNotEmpty()) col.addView(text(age, style.sp(12f), 0xFF9E9E9E.toInt()))
 
         for (control in ControlSurface(context, onCall).build(entity)) col.addView(control)
 
         if (entity.attributes.isNotEmpty()) {
             col.addView(spacer())
-            col.addView(text("ATTRIBUTES", 12f, 0xFFFF6F00.toInt()))
-            col.addView(text(entity.attributesText, 13f, 0xFFBBBBBB.toInt()))
+            col.addView(text("ATTRIBUTES", style.sp(12f), style.accent))
+            col.addView(text(entity.attributesText, style.sp(13f), 0xFFBBBBBB.toInt()))
         }
 
         scroll.addView(col, MATCH, WRAP)

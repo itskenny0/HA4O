@@ -24,6 +24,9 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
 
     var listener: Listener? = null
 
+    /** Highlight colour for the active tab; set from the app accent. */
+    var accentColor: Int = 0xFFFF6F00.toInt()
+
     private val row = LinearLayout(context)
     private val density = context.resources.displayMetrics.density
 
@@ -46,7 +49,7 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
         view.gravity = Gravity.CENTER
         view.setPadding(pad(14), pad(12), pad(14), pad(12))
         view.setTextColor(if (selected) Color.WHITE else 0xFF9E9E9E.toInt())
-        view.setBackgroundColor(if (selected) ACCENT else Color.TRANSPARENT)
+        view.setBackgroundColor(if (selected) accentColor else Color.TRANSPARENT)
         view.setOnClickListener { listener?.onTabSelected(tab.key) }
         return view
     }
@@ -55,6 +58,5 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
 
     companion object {
         const val FAVOURITES_KEY = "favourites"
-        private val ACCENT = 0xFFFF6F00.toInt()
     }
 }

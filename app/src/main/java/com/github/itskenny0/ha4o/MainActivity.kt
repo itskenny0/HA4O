@@ -57,7 +57,10 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private var finderMode = false
     private var moreInfoId: String? = null
     private var moreInfoView: View? = null
-    private var appliedLayout = ""
+    private lateinit var style: Style
+    private var customizations: Map<String, Customizations.Custom> = emptyMap()
+    private var appliedSig = ""
+    private var lastWheelMs = 0L
     private var socket: HaSocket? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,30 +71,45 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             return
         }
         favourites.addAll(prefs.favourites)
+        reloadLook()
         setContentView(buildUi())
-        applyLayout()
+        applyLook()
         connect()
     }
 
     override fun onResume() {
         super.onResume()
-        // Re-apply if the layout changed in Settings while we were away.
-        if (::cardList.isInitialized && prefs.cardLayout != appliedLayout) {
-            applyLayout()
+        // Re-apply if a setting (layout/theme/customization) changed while we were away.
+        if (::cardList.isInitialized && lookSig() != appliedSig) {
+            reloadLook()
+            applyLook()
             rebuild()
         }
     }
 
-    /** (Re)build the card adapter and list spacing for the configured layout mode. */
-    private fun applyLayout() {
+    private fun reloadLook() {
+        style = Style.from(prefs)
+        customizations = prefs.customizations
+    }
+
+    private fun lookSig(): String = listOf(
+        prefs.cardLayout, prefs.accent, prefs.textSize, prefs.density, prefs.paletteSet,
+        prefs.customizations.hashCode(),
+    ).joinToString("|")
+
+    /** (Re)build the adapters, spacing, and accent for the configured layout + theme. */
+    private fun applyLook() {
+        appliedSig = lookSig()
+        tabStrip.accentColor = style.accent
         val layout = prefs.cardLayout
-        appliedLayout = layout
         val compact = layout == "list"
         val peek = layout == "peek"
         val screenH = resources.displayMetrics.heightPixels
         val peekHeight = if (peek) (screenH * 0.72).toInt() else 0
-        cardAdapter = CardAdapter(this, displayed, favourites, this, compact, peekHeight)
+        cardAdapter = CardAdapter(this, displayed, favourites, this, style, customizations, compact, peekHeight)
         cardList.adapter = cardAdapter
+        finderAdapter = EntityAdapter(this, finderItems, favourites, style, customizations)
+        finderList.adapter = finderAdapter
         if (peek) {
             val padV = (screenH * 0.12).toInt()
             cardList.setPadding(dp(8), padV, dp(8), padV)
@@ -159,9 +177,8 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             override fun afterTextChanged(s: Editable?) = applyFinderFilter()
         })
 
-        finderAdapter = EntityAdapter(this, finderItems, favourites)
         finderList = ListView(this)
-        finderList.adapter = finderAdapter
+        // finderList.adapter is assigned by applyLook() (so theme changes recreate it).
         finderList.setOnItemClickListener { _, _, pos, _ -> onFinderTapped(finderItems[pos]) }
         finderList.setOnItemLongClickListener { _, _, pos, _ -> toggleFavourite(finderItems[pos]); true }
 
@@ -301,6 +318,73 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     private fun openSettings() = startActivity(Intent(this, SettingsActivity::class.java))
 
+    /** Per-entity override editor: custom name, glyph, and card colour. */
+    private fun showCustomize(entity: EntityState) {
+        val existing = customizations[entity.entityId] ?: Customizations.Custom()
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val p = dp(16)
+        col.setPadding(p, p, p, p)
+
+        col.addView(dialogLabel("Name (blank = default)"))
+        val nameField = EditText(this)
+        nameField.setText(existing.name)
+        nameField.hint = entity.displayName
+        nameField.setSingleLine(true)
+        col.addView(nameField)
+
+        col.addView(dialogLabel("Glyph (blank = default)"))
+        val glyphField = EditText(this)
+        glyphField.setText(existing.glyph)
+        glyphField.setSingleLine(true)
+        col.addView(glyphField)
+
+        col.addView(dialogLabel("Colour"))
+        var chosen = existing.color
+        val swatches = listOf(
+            0, 0xFFFFCA28.toInt(), 0xFFFF7043.toInt(), 0xFF66BB6A.toInt(),
+            0xFF42A5F5.toInt(), 0xFFAB47BC.toInt(), 0xFF26C6DA.toInt(),
+        )
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        for (c in swatches) {
+            val b = Button(this)
+            if (c == 0) b.text = "✕" else b.setBackgroundColor(c)
+            b.setOnClickListener { chosen = c }
+            row.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        col.addView(row)
+
+        AlertDialog.Builder(this)
+            .setTitle("Customize")
+            .setView(col)
+            .setPositiveButton("Save") { _, _ ->
+                val map = HashMap(customizations)
+                val custom = Customizations.Custom(
+                    nameField.text.toString().trim(), glyphField.text.toString().trim(), chosen,
+                )
+                if (custom.isEmpty) map.remove(entity.entityId) else map[entity.entityId] = custom
+                prefs.customizations = map
+                reloadLook(); applyLook(); rebuild(); refreshMoreInfo()
+            }
+            .setNeutralButton("Reset") { _, _ ->
+                val map = HashMap(customizations)
+                map.remove(entity.entityId)
+                prefs.customizations = map
+                reloadLook(); applyLook(); rebuild(); refreshMoreInfo()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun dialogLabel(text: String): TextView {
+        val t = TextView(this)
+        t.text = text
+        t.setTextColor(0xFF9E9E9E.toInt())
+        t.setPadding(0, dp(8), 0, 0)
+        return t
+    }
+
     private fun showMasterOff() {
         val items = arrayOf("All lights off", "All switches off", "Pause all media")
         AlertDialog.Builder(this)
@@ -390,10 +474,16 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private fun showMoreInfo(entity: EntityState) {
         closeMoreInfo()
         moreInfoId = entity.entityId
-        val view = MoreInfoView(this, entity, { socket?.callService(it) }, { closeMoreInfo() }).root
-        moreInfoView = view
-        content.addView(view, fill())
+        moreInfoView = buildMoreInfo(entity)
+        content.addView(moreInfoView, fill())
     }
+
+    private fun buildMoreInfo(entity: EntityState): View = MoreInfoView(
+        this, entity, style, customizations,
+        onCall = { socket?.callService(it) },
+        onCustomize = { showCustomize(entity) },
+        onClose = { closeMoreInfo() },
+    ).root
 
     private fun closeMoreInfo() {
         moreInfoView?.let { content.removeView(it) }
@@ -401,14 +491,13 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         moreInfoId = null
     }
 
-    /** Rebuild the open more-info overlay from the latest state, preserving scroll-free. */
+    /** Rebuild the open more-info overlay from the latest state. */
     private fun refreshMoreInfo() {
         val id = moreInfoId ?: return
         val entity = allEntities.firstOrNull { it.entityId == id } ?: return
         moreInfoView?.let { content.removeView(it) }
-        val view = MoreInfoView(this, entity, { socket?.callService(it) }, { closeMoreInfo() }).root
-        moreInfoView = view
-        content.addView(view, fill())
+        moreInfoView = buildMoreInfo(entity)
+        content.addView(moreInfoView, fill())
     }
 
     override fun onBackPressed() {
@@ -457,16 +546,17 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     // --- hardware wheel: volume keys + D-pad nudge the top card's primary slider ---
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        val step = prefs.wheelStep
-        val delta = when (keyCode) {
-            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_DPAD_UP -> step
-            KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_DPAD_DOWN -> -step
-            else -> return super.onKeyDown(keyCode, event)
-        }
+        val up = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP
+        val down = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+        if (!up && !down) return super.onKeyDown(keyCode, event)
         if (finderMode) return super.onKeyDown(keyCode, event)
         val entity = displayed.getOrNull(cardList.firstVisiblePosition)
             ?: return super.onKeyDown(keyCode, event)
         val current = Controls.describe(entity).primary ?: return super.onKeyDown(keyCode, event)
+        val now = System.currentTimeMillis()
+        val step = WheelAccel.step(prefs.wheelStep, now - lastWheelMs, prefs.wheelAccel)
+        lastWheelMs = now
+        val delta = if (up) step else -step
         val call = Controls.setPrimary(entity, (current + delta).coerceIn(0, 100))
             ?: return super.onKeyDown(keyCode, event)
         socket?.callService(call)

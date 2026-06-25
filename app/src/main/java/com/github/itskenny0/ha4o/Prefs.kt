@@ -53,6 +53,48 @@ class Prefs(context: Context) {
             sp.edit().putInt(KEY_WHEEL_STEP, value).commit()
         }
 
+    /** Whether rapid wheel presses accelerate the step. */
+    var wheelAccel: Boolean
+        get() = sp.getBoolean(KEY_WHEEL_ACCEL, true)
+        set(value) {
+            sp.edit().putBoolean(KEY_WHEEL_ACCEL, value).commit()
+        }
+
+    /** Accent role: "warm" (default), "cool", "green", "neutral". */
+    var accent: String
+        get() = sp.getString(KEY_ACCENT, "warm") ?: "warm"
+        set(value) {
+            sp.edit().putString(KEY_ACCENT, value).commit()
+        }
+
+    /** Text size: "compact", "default", "large", "xlarge". */
+    var textSize: String
+        get() = sp.getString(KEY_TEXT_SIZE, "default") ?: "default"
+        set(value) {
+            sp.edit().putString(KEY_TEXT_SIZE, value).commit()
+        }
+
+    /** Card density: "comfortable" (default) or "compact". */
+    var density: String
+        get() = sp.getString(KEY_DENSITY, "comfortable") ?: "comfortable"
+        set(value) {
+            sp.edit().putString(KEY_DENSITY, value).commit()
+        }
+
+    /** Card palette set: "vivid" (default), "pastel", "neon". */
+    var paletteSet: String
+        get() = sp.getString(KEY_PALETTE, "vivid") ?: "vivid"
+        set(value) {
+            sp.edit().putString(KEY_PALETTE, value).commit()
+        }
+
+    /** Per-entity display overrides (name / glyph / colour). */
+    var customizations: Map<String, Customizations.Custom>
+        get() = Customizations.decode(sp.getString(KEY_CUSTOM, null))
+        set(value) {
+            sp.edit().putString(KEY_CUSTOM, Customizations.encode(value)).commit()
+        }
+
     fun clear() {
         sp.edit().clear().commit()
     }
@@ -64,5 +106,11 @@ class Prefs(context: Context) {
         private const val KEY_FAV_ONLY = "fav_only"
         private const val KEY_LAYOUT = "card_layout"
         private const val KEY_WHEEL_STEP = "wheel_step"
+        private const val KEY_WHEEL_ACCEL = "wheel_accel"
+        private const val KEY_ACCENT = "accent"
+        private const val KEY_TEXT_SIZE = "text_size"
+        private const val KEY_DENSITY = "density"
+        private const val KEY_PALETTE = "palette_set"
+        private const val KEY_CUSTOM = "customizations"
     }
 }
