@@ -18,8 +18,8 @@ import android.widget.TextView
 class EntityAdapter(
     private val context: Context,
     private val items: List<EntityState>,
-    /** Live reference to the favourite ids; favourited rows get a trailing star. */
-    private val favourites: Set<String>,
+    /** Ids on the active page; those rows get a trailing star so you see what's added. */
+    private val onPageIds: Set<String>,
     private val style: Style,
     private val customizations: Map<String, Customizations.Custom>,
 ) : BaseAdapter() {
@@ -65,7 +65,7 @@ class EntityAdapter(
         labels.addView(state)
         row.addView(labels, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        if (favourites.contains(entity.entityId)) {
+        if (onPageIds.contains(entity.entityId)) {
             val star = TextView(context)
             star.text = "★"
             star.setTextColor(style.accent)

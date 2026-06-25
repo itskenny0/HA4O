@@ -95,6 +95,29 @@ class Prefs(context: Context) {
             sp.edit().putString(KEY_CUSTOM, Customizations.encode(value)).commit()
         }
 
+    /**
+     * The card-stack pages. When none are stored yet, seed a Home page from the legacy flat
+     * favourites set (so an upgrade keeps the user's favourites as their first page).
+     */
+    var pages: List<Pages.Page>
+        get() {
+            val raw = sp.getString(KEY_PAGES, null)
+            if (raw != null) return Pages.decode(raw)
+            val legacy = Favourites.decode(sp.getString(KEY_FAVS, null))
+            return if (legacy.isEmpty()) Pages.default()
+            else listOf(Pages.Page("home", "Home", legacy.toList()))
+        }
+        set(value) {
+            sp.edit().putString(KEY_PAGES, Pages.encode(value)).commit()
+        }
+
+    /** The page the card stack last showed; clamped to a real page by the caller. */
+    var activePageId: String
+        get() = sp.getString(KEY_ACTIVE_PAGE, "") ?: ""
+        set(value) {
+            sp.edit().putString(KEY_ACTIVE_PAGE, value).commit()
+        }
+
     fun clear() {
         sp.edit().clear().commit()
     }
@@ -112,5 +135,7 @@ class Prefs(context: Context) {
         private const val KEY_DENSITY = "density"
         private const val KEY_PALETTE = "palette_set"
         private const val KEY_CUSTOM = "customizations"
+        private const val KEY_PAGES = "pages"
+        private const val KEY_ACTIVE_PAGE = "active_page"
     }
 }

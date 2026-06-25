@@ -20,7 +20,6 @@ import android.widget.TextView
 class CardAdapter(
     private val context: Context,
     private val items: List<EntityState>,
-    private val favourites: Set<String>,
     private val listener: Listener,
     private val style: Style,
     private val customizations: Map<String, Customizations.Custom>,
@@ -89,7 +88,7 @@ class CardAdapter(
         val custom = customizations[entity.entityId]
         val name = custom?.name?.ifEmpty { null } ?: entity.displayName
         val glyphChar = custom?.glyph?.ifEmpty { null } ?: glyphFor(d.domain)
-        val glyph = label("$glyphChar  ${favStar(entity)}$name")
+        val glyph = label("$glyphChar  $name")
         glyph.textSize = style.sp(16f)
         row.addView(glyph, LinearLayout.LayoutParams(0, WRAP, 1f))
 
@@ -125,9 +124,6 @@ class CardAdapter(
         t.setTextColor(Color.WHITE)
         return t
     }
-
-    private fun favStar(entity: EntityState): String =
-        if (favourites.contains(entity.entityId)) "★ " else ""
 
     private fun pad(v: Int): Int = (v * density).toInt()
 

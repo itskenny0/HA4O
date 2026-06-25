@@ -27,11 +27,12 @@ import android.widget.Toast
 import kotlin.math.abs
 
 /**
- * The card-stack home screen: a top bar, a horizontal domain tab strip, and a vertically
- * scrolling list of gradient cards for the selected domain. Swipe horizontally (or tap a
- * tab) to switch domains; the hardware volume keys and D-pad nudge the top card's primary
- * slider. Long-press a card to favourite it. A menu opens the flat "All entities" finder.
- * Framework widgets only, built in code; live state_changed updates patch the cards.
+ * The card-stack home screen: a top bar, a tab strip of user-defined pages, and a
+ * vertically scrolling list of gradient cards for the active page. Each page is a curated
+ * list of entities (like R1HA's favourite pages); add a page with the strip's ＋, long-press
+ * a tab to rename/delete it, and add cards from the "All entities" finder (long-press a row).
+ * Swipe horizontally (or tap a tab) to switch pages; the volume keys / D-pad nudge the top
+ * card's slider. Framework widgets only, built in code; live updates patch the cards.
  */
 class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapter.Listener {
 
@@ -52,8 +53,8 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private val allEntities = ArrayList<EntityState>()
     private val displayed = ArrayList<EntityState>()
     private val finderItems = ArrayList<EntityState>()
-    private val favourites = HashSet<String>()
-    private var selectedTab = TabStrip.FAVOURITES_KEY
+    private var pages: List<Pages.Page> = Pages.default()
+    private var activePageId = "home"
     private var finderMode = false
     private var moreInfoId: String? = null
     private var moreInfoView: View? = null
@@ -70,12 +71,25 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             goToOnboarding()
             return
         }
-        favourites.addAll(prefs.favourites)
+        loadPages()
         reloadLook()
         setContentView(buildUi())
         applyLook()
         connect()
     }
+
+    private fun loadPages() {
+        pages = prefs.pages
+        activePageId = prefs.activePageId.ifEmpty { pages.first().id }
+        if (pages.none { it.id == activePageId }) activePageId = pages.first().id
+    }
+
+    private fun savePages() {
+        prefs.pages = pages
+        prefs.activePageId = activePageId
+    }
+
+    private fun activePage(): Pages.Page = pages.firstOrNull { it.id == activePageId } ?: pages.first()
 
     override fun onResume() {
         super.onResume()
@@ -106,10 +120,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         val peek = layout == "peek"
         val screenH = resources.displayMetrics.heightPixels
         val peekHeight = if (peek) (screenH * 0.72).toInt() else 0
-        cardAdapter = CardAdapter(this, displayed, favourites, this, style, customizations, compact, peekHeight)
+        cardAdapter = CardAdapter(this, displayed, this, style, customizations, compact, peekHeight)
         cardList.adapter = cardAdapter
-        finderAdapter = EntityAdapter(this, finderItems, favourites, style, customizations)
-        finderList.adapter = finderAdapter
+        // finderAdapter is (re)created in rebuild() so its star set tracks the active page.
         if (peek) {
             val padV = (screenH * 0.12).toInt()
             cardList.setPadding(dp(8), padV, dp(8), padV)
@@ -129,6 +142,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
         tabStrip = TabStrip(this)
         tabStrip.listener = this
+        tabStrip.onAddTab = { addTab() }
         root.addView(tabStrip, wrap())
 
         content = FrameLayout(this)
@@ -147,7 +161,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         emptyState = TextView(this)
         emptyState.gravity = Gravity.CENTER
         emptyState.setTextColor(0xFF9E9E9E.toInt())
-        emptyState.text = "NO FAVOURITES YET\n\nbrowse domains to add some"
+        emptyState.text = "THIS TAB IS EMPTY\n\nopen All entities (menu) and long-press to add cards"
         emptyState.visibility = View.GONE
         content.addView(emptyState, fill())
 
@@ -155,7 +169,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
         root.addView(content, fill())
 
-        // Horizontal flings over the card area switch domains; vertical scrolling is left
+        // Horizontal flings over the card area switch pages; vertical scrolling is left
         // to the ListView (we never consume the event here).
         gestures = GestureDetector(this, SwipeListener())
         cardList.setOnTouchListener { _, ev -> gestures.onTouchEvent(ev); false }
@@ -178,9 +192,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         })
 
         finderList = ListView(this)
-        // finderList.adapter is assigned by applyLook() (so theme changes recreate it).
+        // finderList.adapter is assigned by rebuild() (so it tracks the active page).
         finderList.setOnItemClickListener { _, _, pos, _ -> onFinderTapped(finderItems[pos]) }
-        finderList.setOnItemLongClickListener { _, _, pos, _ -> toggleFavourite(finderItems[pos]); true }
+        finderList.setOnItemLongClickListener { _, _, pos, _ -> toggleOnPage(finderItems[pos]); true }
 
         finderPanel = LinearLayout(this)
         finderPanel.orientation = LinearLayout.VERTICAL
@@ -225,7 +239,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         position.setTextColor(0xFF9E9E9E.toInt())
         bar.addView(position, wrap())
 
-        bar.addView(barButton("★") { showFavouritesTab() }, wrap())
+        bar.addView(barButton("＋") { addTab() }, wrap())
         return bar
     }
 
@@ -246,48 +260,27 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     // --- tab + content state -------------------------------------------------
 
-    private fun buildTabs(): List<TabStrip.Tab> {
-        val counts = LinkedHashMap<String, Int>()
-        for (e in allEntities) {
-            val dom = Controls.domainOf(e.entityId)
-            counts[dom] = (counts[dom] ?: 0) + 1
-        }
-        val tabs = ArrayList<TabStrip.Tab>()
-        val favCount = allEntities.count { favourites.contains(it.entityId) }
-        // The Favourites tab appears once there are favourites, or while it's the active
-        // tab (so the ★ button can land on it and show the empty state when there are none).
-        if (favourites.isNotEmpty() || selectedTab == TabStrip.FAVOURITES_KEY) {
-            tabs.add(TabStrip.Tab(TabStrip.FAVOURITES_KEY, "★ FAVOURITES", favCount))
-        }
-        for (dom in counts.keys.sorted()) {
-            tabs.add(TabStrip.Tab(dom, dom.uppercase(), counts[dom] ?: 0))
-        }
-        return tabs
-    }
-
     private fun rebuild() {
-        val tabs = buildTabs()
-        if (tabs.none { it.key == selectedTab }) {
-            selectedTab = tabs.firstOrNull()?.key ?: ""
+        if (pages.none { it.id == activePageId }) activePageId = pages.first().id
+        val tabs = pages.map { page ->
+            TabStrip.Tab(page.id, page.name, page.ids.count { id -> allEntities.any { it.entityId == id } })
         }
-        tabStrip.setTabs(tabs, selectedTab)
+        tabStrip.setTabs(tabs, activePageId)
 
+        // The active page's entities, in the order the user added them.
+        val byId = allEntities.associateBy { it.entityId }
         displayed.clear()
-        displayed.addAll(
-            if (selectedTab == TabStrip.FAVOURITES_KEY) {
-                allEntities.filter { favourites.contains(it.entityId) }
-            } else {
-                allEntities.filter { Controls.domainOf(it.entityId) == selectedTab }
-            },
-        )
+        displayed.addAll(activePage().ids.mapNotNull { byId[it] })
         cardAdapter.notifyDataSetChanged()
+        finderAdapter = EntityAdapter(this, finderItems, activePage().ids.toSet(), style, customizations)
+        finderList.adapter = finderAdapter
         if (finderMode) applyFinderFilter()
         updateContentVisibility()
         updatePosition()
     }
 
     private fun updateContentVisibility() {
-        val showEmpty = !finderMode && selectedTab == TabStrip.FAVOURITES_KEY && displayed.isEmpty()
+        val showEmpty = !finderMode && displayed.isEmpty()
         finderPanel.visibility = if (finderMode) View.VISIBLE else View.GONE
         emptyState.visibility = if (showEmpty) View.VISIBLE else View.GONE
         cardList.visibility = if (!finderMode && !showEmpty) View.VISIBLE else View.GONE
@@ -297,8 +290,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         val items = arrayOf(
             if (finderMode) "Card view" else "All entities",
             "Settings",
+            "Add tab",
+            "Manage this tab…",
             "Master off…",
-            "Clear favourites",
             "Reconnect",
             "Sign out",
         )
@@ -307,10 +301,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
                 when (which) {
                     0 -> { finderMode = !finderMode; rebuild() }
                     1 -> openSettings()
-                    2 -> showMasterOff()
-                    3 -> clearFavourites()
-                    4 -> connect()
-                    5 -> { prefs.clear(); goToOnboarding() }
+                    2 -> addTab()
+                    3 -> manageTab(activePageId)
+                    4 -> showMasterOff()
+                    5 -> connect()
+                    6 -> { prefs.clear(); goToOnboarding() }
                 }
             }
             .show()
@@ -408,22 +403,63 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         toast("$service → ${ids.size} $domain")
     }
 
-    private fun clearFavourites() {
-        if (favourites.isEmpty()) {
-            toast("No favourites to clear")
-            return
-        }
+    /** Prompt for a name and create a new (empty) page, switching to it. */
+    private fun addTab() {
+        val field = EditText(this)
+        field.hint = "Tab name"
+        field.setSingleLine(true)
         AlertDialog.Builder(this)
-            .setTitle("Clear favourites?")
-            .setMessage("Remove all ${favourites.size} favourites?")
-            .setPositiveButton("Clear") { _, _ ->
-                favourites.clear()
-                prefs.favourites = favourites
+            .setTitle("Add tab")
+            .setView(field)
+            .setPositiveButton("Add") { _, _ ->
+                val name = field.text.toString().trim().ifEmpty { "Tab ${pages.size + 1}" }
+                pages = Pages.addPage(pages, name)
+                activePageId = pages.last().id
+                savePages()
                 rebuild()
-                toast("Favourites cleared")
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** Rename or delete [pageId]. Delete is offered only when more than one page exists. */
+    private fun manageTab(pageId: String) {
+        val page = pages.firstOrNull { it.id == pageId } ?: return
+        val field = EditText(this)
+        field.setText(page.name)
+        field.setSingleLine(true)
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Manage tab")
+            .setView(field)
+            .setPositiveButton("Rename") { _, _ ->
+                val name = field.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    pages = Pages.renamePage(pages, pageId, name)
+                    savePages()
+                    rebuild()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+        if (pages.size > 1) {
+            builder.setNeutralButton("Delete") { _, _ ->
+                pages = Pages.deletePage(pages, pageId)
+                if (activePageId == pageId) activePageId = pages.first().id
+                savePages()
+                rebuild()
+            }
+        }
+        builder.show()
+    }
+
+    /** Add the entity to the active page, or remove it if already there. */
+    private fun toggleOnPage(entity: EntityState) {
+        val id = entity.entityId
+        val onPage = activePage().ids.contains(id)
+        pages = if (onPage) Pages.removeEntity(pages, activePageId, id)
+        else Pages.addEntity(pages, activePageId, id)
+        savePages()
+        rebuild()
+        toast(if (onPage) "Removed ${entity.displayName}" else "Added ${entity.displayName} to ${activePage().name}")
     }
 
     private fun updatePosition() {
@@ -434,19 +470,13 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         }
     }
 
-    private fun showFavouritesTab() {
-        finderMode = false
-        selectedTab = TabStrip.FAVOURITES_KEY
-        rebuild()
-    }
-
     private fun stepTab(direction: Int) {
-        val tabs = buildTabs()
-        val idx = tabs.indexOfFirst { it.key == selectedTab }
+        val idx = pages.indexOfFirst { it.id == activePageId }
         if (idx < 0) return
-        val next = (idx + direction).coerceIn(0, tabs.size - 1)
+        val next = (idx + direction).coerceIn(0, pages.size - 1)
         if (next != idx) {
-            selectedTab = tabs[next].key
+            activePageId = pages[next].id
+            savePages()
             rebuild()
         }
     }
@@ -455,9 +485,12 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     override fun onTabSelected(key: String) {
         finderMode = false
-        selectedTab = key
+        activePageId = key
+        savePages()
         rebuild()
     }
+
+    override fun onTabLongPress(key: String) = manageTab(key)
 
     // --- CardAdapter.Listener ---
 
@@ -465,7 +498,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         socket?.callService(call)
     }
 
-    override fun onCardLongPress(entity: EntityState) = toggleFavourite(entity)
+    override fun onCardLongPress(entity: EntityState) = toggleOnPage(entity)
 
     override fun onCardTap(entity: EntityState) = showMoreInfo(entity)
 
@@ -512,11 +545,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             Controls.Kind.Toggle -> socket?.callService(Controls.toggle(id))
             Controls.Kind.FireOnce -> socket?.callService(Controls.fireOnce(id))
             Controls.Kind.ReadOnly -> showAttributes(entity)
-            else -> { // scalar: jump to its domain card
-                finderMode = false
-                selectedTab = Controls.domainOf(id)
-                rebuild()
-            }
+            else -> showMoreInfo(entity) // scalar: open the full controls
         }
     }
 
@@ -529,18 +558,6 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             )
             .setPositiveButton("OK", null)
             .show()
-    }
-
-    private fun toggleFavourite(entity: EntityState) {
-        val id = entity.entityId
-        val nowFav = if (favourites.contains(id)) {
-            favourites.remove(id); false
-        } else {
-            favourites.add(id); true
-        }
-        prefs.favourites = favourites
-        rebuild()
-        toast(if (nowFav) "★ Favourited ${entity.displayName}" else "Removed ${entity.displayName}")
     }
 
     // --- hardware wheel: volume keys + D-pad nudge the top card's primary slider ---
@@ -606,10 +623,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_FINDER, 0, "All entities")
         menu.add(0, MENU_SETTINGS, 1, "Settings")
-        menu.add(0, MENU_MASTER_OFF, 2, "Master off…")
-        menu.add(0, MENU_CLEAR_FAVS, 3, "Clear favourites")
-        menu.add(0, MENU_RECONNECT, 4, "Reconnect")
-        menu.add(0, MENU_SIGN_OUT, 5, "Sign out")
+        menu.add(0, MENU_ADD_TAB, 2, "Add tab")
+        menu.add(0, MENU_MANAGE_TAB, 3, "Manage this tab…")
+        menu.add(0, MENU_MASTER_OFF, 4, "Master off…")
+        menu.add(0, MENU_RECONNECT, 5, "Reconnect")
+        menu.add(0, MENU_SIGN_OUT, 6, "Sign out")
         return true
     }
 
@@ -622,8 +640,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         return when (item.itemId) {
             MENU_FINDER -> { finderMode = !finderMode; rebuild(); true }
             MENU_SETTINGS -> { openSettings(); true }
+            MENU_ADD_TAB -> { addTab(); true }
+            MENU_MANAGE_TAB -> { manageTab(activePageId); true }
             MENU_MASTER_OFF -> { showMasterOff(); true }
-            MENU_CLEAR_FAVS -> { clearFavourites(); true }
             MENU_RECONNECT -> { connect(); true }
             MENU_SIGN_OUT -> { prefs.clear(); goToOnboarding(); true }
             else -> super.onOptionsItemSelected(item)
@@ -653,7 +672,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
 
-    /** Detects a horizontal fling and steps to the previous/next domain tab. */
+    /** Detects a horizontal fling and steps to the previous/next page. */
     private inner class SwipeListener : GestureDetector.SimpleOnGestureListener() {
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
             if (e1 == null) return false
@@ -668,10 +687,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     companion object {
         private const val MENU_FINDER = 1
         private const val MENU_SETTINGS = 2
-        private const val MENU_MASTER_OFF = 3
-        private const val MENU_CLEAR_FAVS = 4
-        private const val MENU_RECONNECT = 5
-        private const val MENU_SIGN_OUT = 6
+        private const val MENU_ADD_TAB = 3
+        private const val MENU_MANAGE_TAB = 4
+        private const val MENU_MASTER_OFF = 5
+        private const val MENU_RECONNECT = 6
+        private const val MENU_SIGN_OUT = 7
         private val BG = 0xFF121212.toInt()
     }
 }

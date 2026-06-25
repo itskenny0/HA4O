@@ -17,7 +17,11 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
 
     interface Listener {
         fun onTabSelected(key: String)
+        fun onTabLongPress(key: String)
     }
+
+    /** Shown as a trailing "＋" chip when set; tapping it adds a page. */
+    var onAddTab: (() -> Unit)? = null
 
     /** A tab's stable key ("favourites" or a domain) and its display label. */
     data class Tab(val key: String, val label: String, val count: Int)
@@ -41,6 +45,15 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
         for (tab in tabs) {
             row.addView(tabView(tab, tab.key == selectedKey))
         }
+        onAddTab?.let { add ->
+            val plus = TextView(context)
+            plus.text = "＋"
+            plus.gravity = Gravity.CENTER
+            plus.setPadding(pad(14), pad(12), pad(14), pad(12))
+            plus.setTextColor(0xFF9E9E9E.toInt())
+            plus.setOnClickListener { add() }
+            row.addView(plus)
+        }
     }
 
     private fun tabView(tab: Tab, selected: Boolean): TextView {
@@ -51,12 +64,9 @@ class TabStrip(context: Context) : HorizontalScrollView(context) {
         view.setTextColor(if (selected) Color.WHITE else 0xFF9E9E9E.toInt())
         view.setBackgroundColor(if (selected) accentColor else Color.TRANSPARENT)
         view.setOnClickListener { listener?.onTabSelected(tab.key) }
+        view.setOnLongClickListener { listener?.onTabLongPress(tab.key); true }
         return view
     }
 
     private fun pad(v: Int): Int = (v * density).toInt()
-
-    companion object {
-        const val FAVOURITES_KEY = "favourites"
-    }
 }
