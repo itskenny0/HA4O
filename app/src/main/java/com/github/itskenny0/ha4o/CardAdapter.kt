@@ -22,6 +22,10 @@ class CardAdapter(
     private val items: List<EntityState>,
     private val favourites: Set<String>,
     private val listener: Listener,
+    /** List mode: show only the primary control; tap the card for the rest. */
+    private val compact: Boolean = false,
+    /** Peek-deck mode: minimum card height in px so one card fills the viewport (0 = wrap). */
+    private val cardMinHeightPx: Int = 0,
 ) : BaseAdapter() {
 
     interface Listener {
@@ -44,6 +48,7 @@ class CardAdapter(
         card.orientation = LinearLayout.VERTICAL
         card.setPadding(pad(16), pad(16), pad(16), pad(16))
         card.setBackgroundDrawable(cardBackground(d))
+        if (cardMinHeightPx > 0) card.minimumHeight = cardMinHeightPx
         // Inter-card spacing is the ListView's transparent divider; item-view margins are
         // stripped by AbsListView, so they're not set here.
 
@@ -51,7 +56,11 @@ class CardAdapter(
         head.setOnClickListener { listener.onCardTap(entity) }
         card.addView(head)
         card.addView(bigState(d))
-        for (control in controls.build(entity)) card.addView(control)
+        // List mode shows just the primary control (build()'s first row); the rest live in
+        // more-info. Expanded and peek modes show the full surface.
+        val built = controls.build(entity)
+        val shown = if (compact) listOfNotNull(built.firstOrNull()) else built
+        for (control in shown) card.addView(control)
 
         card.setOnLongClickListener { listener.onCardLongPress(entity); true }
         return card

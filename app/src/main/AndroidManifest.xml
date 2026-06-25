@@ -36,5 +36,10 @@
             android:name=".OnboardingActivity"
             android:label="@string/app_name"
             android:exported="false"/>
+
+        <activity
+            android:name=".SettingsActivity"
+            android:label="@string/app_name"
+            android:exported="false"/>
     </application>
 </manifest>

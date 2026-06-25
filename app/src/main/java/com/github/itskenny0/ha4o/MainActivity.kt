@@ -57,6 +57,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private var finderMode = false
     private var moreInfoId: String? = null
     private var moreInfoView: View? = null
+    private var appliedLayout = ""
     private var socket: HaSocket? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,7 +69,37 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         }
         favourites.addAll(prefs.favourites)
         setContentView(buildUi())
+        applyLayout()
         connect()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-apply if the layout changed in Settings while we were away.
+        if (::cardList.isInitialized && prefs.cardLayout != appliedLayout) {
+            applyLayout()
+            rebuild()
+        }
+    }
+
+    /** (Re)build the card adapter and list spacing for the configured layout mode. */
+    private fun applyLayout() {
+        val layout = prefs.cardLayout
+        appliedLayout = layout
+        val compact = layout == "list"
+        val peek = layout == "peek"
+        val screenH = resources.displayMetrics.heightPixels
+        val peekHeight = if (peek) (screenH * 0.72).toInt() else 0
+        cardAdapter = CardAdapter(this, displayed, favourites, this, compact, peekHeight)
+        cardList.adapter = cardAdapter
+        if (peek) {
+            val padV = (screenH * 0.12).toInt()
+            cardList.setPadding(dp(8), padV, dp(8), padV)
+            cardList.dividerHeight = dp(8)
+        } else {
+            cardList.setPadding(dp(8), dp(8), dp(8), dp(8))
+            cardList.dividerHeight = dp(10)
+        }
     }
 
     private fun buildUi(): View {
@@ -84,15 +115,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
         content = FrameLayout(this)
 
-        cardAdapter = CardAdapter(this, displayed, favourites, this)
         cardList = ListView(this)
-        // Uniform gaps via a transparent divider + list padding. ListView strips margins
-        // from item views, so spacing has to live here, not on the cards.
+        // ListView strips item-view margins, so card spacing lives here as a transparent
+        // divider; applyLayout() sets the divider height and padding per layout mode.
         cardList.divider = ColorDrawable(Color.TRANSPARENT)
-        cardList.dividerHeight = dp(10)
-        cardList.setPadding(dp(8), dp(8), dp(8), dp(8))
         cardList.clipToPadding = false
-        cardList.adapter = cardAdapter
         cardList.setOnScrollListener(object : AbsListView.OnScrollListener {
             override fun onScrollStateChanged(view: AbsListView, state: Int) {}
             override fun onScroll(view: AbsListView, first: Int, visible: Int, total: Int) = updatePosition()
@@ -252,6 +279,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private fun showMenu() {
         val items = arrayOf(
             if (finderMode) "Card view" else "All entities",
+            "Settings",
             "Master off…",
             "Clear favourites",
             "Reconnect",
@@ -261,14 +289,17 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> { finderMode = !finderMode; rebuild() }
-                    1 -> showMasterOff()
-                    2 -> clearFavourites()
-                    3 -> connect()
-                    4 -> { prefs.clear(); goToOnboarding() }
+                    1 -> openSettings()
+                    2 -> showMasterOff()
+                    3 -> clearFavourites()
+                    4 -> connect()
+                    5 -> { prefs.clear(); goToOnboarding() }
                 }
             }
             .show()
     }
+
+    private fun openSettings() = startActivity(Intent(this, SettingsActivity::class.java))
 
     private fun showMasterOff() {
         val items = arrayOf("All lights off", "All switches off", "Pause all media")
@@ -426,9 +457,10 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     // --- hardware wheel: volume keys + D-pad nudge the top card's primary slider ---
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val step = prefs.wheelStep
         val delta = when (keyCode) {
-            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_DPAD_UP -> STEP
-            KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_DPAD_DOWN -> -STEP
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_DPAD_UP -> step
+            KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_DPAD_DOWN -> -step
             else -> return super.onKeyDown(keyCode, event)
         }
         if (finderMode) return super.onKeyDown(keyCode, event)
@@ -483,10 +515,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_FINDER, 0, "All entities")
-        menu.add(0, MENU_MASTER_OFF, 1, "Master off…")
-        menu.add(0, MENU_CLEAR_FAVS, 2, "Clear favourites")
-        menu.add(0, MENU_RECONNECT, 3, "Reconnect")
-        menu.add(0, MENU_SIGN_OUT, 4, "Sign out")
+        menu.add(0, MENU_SETTINGS, 1, "Settings")
+        menu.add(0, MENU_MASTER_OFF, 2, "Master off…")
+        menu.add(0, MENU_CLEAR_FAVS, 3, "Clear favourites")
+        menu.add(0, MENU_RECONNECT, 4, "Reconnect")
+        menu.add(0, MENU_SIGN_OUT, 5, "Sign out")
         return true
     }
 
@@ -498,6 +531,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_FINDER -> { finderMode = !finderMode; rebuild(); true }
+            MENU_SETTINGS -> { openSettings(); true }
             MENU_MASTER_OFF -> { showMasterOff(); true }
             MENU_CLEAR_FAVS -> { clearFavourites(); true }
             MENU_RECONNECT -> { connect(); true }
@@ -543,11 +577,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     companion object {
         private const val MENU_FINDER = 1
-        private const val MENU_MASTER_OFF = 2
-        private const val MENU_CLEAR_FAVS = 3
-        private const val MENU_RECONNECT = 4
-        private const val MENU_SIGN_OUT = 5
-        private const val STEP = 5
+        private const val MENU_SETTINGS = 2
+        private const val MENU_MASTER_OFF = 3
+        private const val MENU_CLEAR_FAVS = 4
+        private const val MENU_RECONNECT = 5
+        private const val MENU_SIGN_OUT = 6
         private val BG = 0xFF121212.toInt()
     }
 }

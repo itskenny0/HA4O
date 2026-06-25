@@ -39,6 +39,20 @@ class Prefs(context: Context) {
             sp.edit().putBoolean(KEY_FAV_ONLY, value).commit()
         }
 
+    /** Card layout: "list" (compact), "expanded" (full controls inline), or "peek" (deck). */
+    var cardLayout: String
+        get() = sp.getString(KEY_LAYOUT, "expanded") ?: "expanded"
+        set(value) {
+            sp.edit().putString(KEY_LAYOUT, value).commit()
+        }
+
+    /** How many percent the hardware wheel / D-pad nudges a slider per press. */
+    var wheelStep: Int
+        get() = sp.getInt(KEY_WHEEL_STEP, 5)
+        set(value) {
+            sp.edit().putInt(KEY_WHEEL_STEP, value).commit()
+        }
+
     fun clear() {
         sp.edit().clear().commit()
     }
@@ -48,5 +62,7 @@ class Prefs(context: Context) {
         private const val KEY_TOKEN = "token"
         private const val KEY_FAVS = "favourites"
         private const val KEY_FAV_ONLY = "fav_only"
+        private const val KEY_LAYOUT = "card_layout"
+        private const val KEY_WHEEL_STEP = "wheel_step"
     }
 }
