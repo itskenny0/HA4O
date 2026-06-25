@@ -1,5 +1,7 @@
 package com.github.itskenny0.ha4o
 
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /**
@@ -12,7 +14,8 @@ import kotlin.math.roundToInt
 object Controls {
 
     enum class Kind {
-        Toggle, LightBrightnessTemp, CoverPosition, FanPercent, Volume, FireOnce, ReadOnly,
+        Toggle, LightBrightnessTemp, CoverPosition, FanPercent, Media, Climate, Lock, Vacuum,
+        Select, NumberStepper, TextInput, ButtonPress, FireOnce, ReadOnly,
     }
 
     data class Descriptor(
@@ -101,7 +104,7 @@ object Controls {
         Kind.LightBrightnessTemp -> setBrightnessPct(entity.entityId, pct)
         Kind.CoverPosition -> setCoverPosition(entity.entityId, pct)
         Kind.FanPercent -> setFanPercentage(entity.entityId, pct)
-        Kind.Volume -> setVolume(entity.entityId, pct)
+        Kind.Media -> setVolume(entity.entityId, pct)
         else -> null
     }
 
@@ -114,7 +117,7 @@ object Controls {
         Kind.LightBrightnessTemp -> num(attrs["brightness"])?.let { (it * 100.0 / 255.0).roundToInt() }
         Kind.CoverPosition -> num(attrs["current_position"])?.roundToInt()
         Kind.FanPercent -> num(attrs["percentage"])?.roundToInt()
-        Kind.Volume -> num(attrs["volume_level"])?.let { (it * 100.0).roundToInt() }
+        Kind.Media -> num(attrs["volume_level"])?.let { (it * 100.0).roundToInt() }
         else -> null
     }
 
@@ -133,9 +136,67 @@ object Controls {
         "light" -> Kind.LightBrightnessTemp
         "cover" -> Kind.CoverPosition
         "fan" -> Kind.FanPercent
-        "media_player" -> Kind.Volume
+        "media_player" -> Kind.Media
+        "climate" -> Kind.Climate
+        "lock" -> Kind.Lock
+        "vacuum" -> Kind.Vacuum
+        "input_select", "select" -> Kind.Select
+        "input_number", "number" -> Kind.NumberStepper
+        "input_button", "button" -> Kind.ButtonPress
+        "input_text", "text" -> Kind.TextInput
         "switch", "input_boolean", "automation", "siren", "humidifier" -> Kind.Toggle
         "scene", "script" -> Kind.FireOnce
         else -> Kind.ReadOnly
+    }
+
+    // --- richer per-domain service-call builders ---
+
+    fun mediaPlay(entityId: String) = ServiceCall("media_player", "media_play", entityId)
+    fun mediaPause(entityId: String) = ServiceCall("media_player", "media_pause", entityId)
+    fun mediaNext(entityId: String) = ServiceCall("media_player", "media_next_track", entityId)
+    fun mediaPrevious(entityId: String) = ServiceCall("media_player", "media_previous_track", entityId)
+    fun setMuted(entityId: String, muted: Boolean) =
+        ServiceCall("media_player", "volume_mute", entityId, mapOf("is_volume_muted" to muted))
+
+    fun setRgb(entityId: String, r: Int, g: Int, b: Int) = ServiceCall(
+        "light", "turn_on", entityId,
+        mapOf("rgb_color" to listOf(r.coerceIn(0, 255), g.coerceIn(0, 255), b.coerceIn(0, 255))),
+    )
+
+    fun setCoverTilt(entityId: String, pct: Int) =
+        ServiceCall("cover", "set_cover_tilt_position", entityId, mapOf("tilt_position" to pct.coerceIn(0, 100)))
+    fun openCoverTilt(entityId: String) = ServiceCall("cover", "open_cover_tilt", entityId)
+    fun closeCoverTilt(entityId: String) = ServiceCall("cover", "close_cover_tilt", entityId)
+
+    fun setClimateTemperature(entityId: String, temperature: Double) =
+        ServiceCall("climate", "set_temperature", entityId, mapOf("temperature" to temperature))
+    fun setHvacMode(entityId: String, mode: String) =
+        ServiceCall("climate", "set_hvac_mode", entityId, mapOf("hvac_mode" to mode))
+
+    fun lock(entityId: String) = ServiceCall("lock", "lock", entityId)
+    fun unlock(entityId: String) = ServiceCall("lock", "unlock", entityId)
+
+    fun vacuumStart(entityId: String) = ServiceCall("vacuum", "start", entityId)
+    fun vacuumPause(entityId: String) = ServiceCall("vacuum", "pause", entityId)
+    fun vacuumReturn(entityId: String) = ServiceCall("vacuum", "return_to_base", entityId)
+
+    fun setNumberValue(entityId: String, value: Double) =
+        ServiceCall(domainOf(entityId), "set_value", entityId, mapOf("value" to value))
+    fun selectOption(entityId: String, option: String) =
+        ServiceCall(domainOf(entityId), "select_option", entityId, mapOf("option" to option))
+    fun press(entityId: String) = ServiceCall(domainOf(entityId), "press", entityId)
+    fun setText(entityId: String, value: String) =
+        ServiceCall(domainOf(entityId), "set_value", entityId, mapOf("value" to value))
+
+    /**
+     * Move one [step] in [direction] within [min]..[max]. An on-grid value moves a full
+     * step; an off-grid value snaps to the next grid point in that direction (so + on 21.3
+     * with a 0.5 step gives 21.5, not 22.0).
+     */
+    fun steppedNumber(current: Double, direction: Int, min: Double, max: Double, step: Double): Double {
+        val safeStep = if (step <= 0.0) 1.0 else step
+        val grid = current / safeStep
+        val next = if (direction >= 0) floor(grid) + 1 else ceil(grid) - 1
+        return (next * safeStep).coerceIn(min, max)
     }
 }

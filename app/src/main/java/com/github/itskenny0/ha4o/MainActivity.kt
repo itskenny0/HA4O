@@ -55,6 +55,8 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private val favourites = HashSet<String>()
     private var selectedTab = TabStrip.FAVOURITES_KEY
     private var finderMode = false
+    private var moreInfoId: String? = null
+    private var moreInfoView: View? = null
     private var socket: HaSocket? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -250,6 +252,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     private fun showMenu() {
         val items = arrayOf(
             if (finderMode) "Card view" else "All entities",
+            "Master off…",
             "Clear favourites",
             "Reconnect",
             "Sign out",
@@ -258,12 +261,36 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> { finderMode = !finderMode; rebuild() }
-                    1 -> clearFavourites()
-                    2 -> connect()
-                    3 -> { prefs.clear(); goToOnboarding() }
+                    1 -> showMasterOff()
+                    2 -> clearFavourites()
+                    3 -> connect()
+                    4 -> { prefs.clear(); goToOnboarding() }
                 }
             }
             .show()
+    }
+
+    private fun showMasterOff() {
+        val items = arrayOf("All lights off", "All switches off", "Pause all media")
+        AlertDialog.Builder(this)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> masterAction("light", "turn_off")
+                    1 -> masterAction("switch", "turn_off")
+                    2 -> masterAction("media_player", "media_pause")
+                }
+            }
+            .show()
+    }
+
+    private fun masterAction(domain: String, service: String) {
+        val ids = allEntities.map { it.entityId }.filter { Controls.domainOf(it) == domain }
+        if (ids.isEmpty()) {
+            toast("No $domain entities")
+            return
+        }
+        for (id in ids) socket?.callService(Controls.ServiceCall(domain, service, id))
+        toast("$service → ${ids.size} $domain")
     }
 
     private fun clearFavourites() {
@@ -324,6 +351,38 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     }
 
     override fun onCardLongPress(entity: EntityState) = toggleFavourite(entity)
+
+    override fun onCardTap(entity: EntityState) = showMoreInfo(entity)
+
+    // --- more-info overlay ---
+
+    private fun showMoreInfo(entity: EntityState) {
+        closeMoreInfo()
+        moreInfoId = entity.entityId
+        val view = MoreInfoView(this, entity, { socket?.callService(it) }, { closeMoreInfo() }).root
+        moreInfoView = view
+        content.addView(view, fill())
+    }
+
+    private fun closeMoreInfo() {
+        moreInfoView?.let { content.removeView(it) }
+        moreInfoView = null
+        moreInfoId = null
+    }
+
+    /** Rebuild the open more-info overlay from the latest state, preserving scroll-free. */
+    private fun refreshMoreInfo() {
+        val id = moreInfoId ?: return
+        val entity = allEntities.firstOrNull { it.entityId == id } ?: return
+        moreInfoView?.let { content.removeView(it) }
+        val view = MoreInfoView(this, entity, { socket?.callService(it) }, { closeMoreInfo() }).root
+        moreInfoView = view
+        content.addView(view, fill())
+    }
+
+    override fun onBackPressed() {
+        if (moreInfoId != null) closeMoreInfo() else super.onBackPressed()
+    }
 
     // --- finder (flat "All entities") ---
 
@@ -393,6 +452,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         allEntities.addAll(states)
         sortEntities()
         rebuild()
+        refreshMoreInfo()
     }
 
     override fun onStateUpdate(entity: EntityState) {
@@ -404,6 +464,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
             sortEntities()
         }
         rebuild()
+        // Only refresh the open detail when its own entity changed, so unrelated traffic
+        // doesn't rebuild (and reset the scroll of) the more-info overlay.
+        if (entity.entityId == moreInfoId) refreshMoreInfo()
     }
 
     override fun onAuthFailed() {
@@ -420,9 +483,10 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, MENU_FINDER, 0, "All entities")
-        menu.add(0, MENU_CLEAR_FAVS, 1, "Clear favourites")
-        menu.add(0, MENU_RECONNECT, 2, "Reconnect")
-        menu.add(0, MENU_SIGN_OUT, 3, "Sign out")
+        menu.add(0, MENU_MASTER_OFF, 1, "Master off…")
+        menu.add(0, MENU_CLEAR_FAVS, 2, "Clear favourites")
+        menu.add(0, MENU_RECONNECT, 3, "Reconnect")
+        menu.add(0, MENU_SIGN_OUT, 4, "Sign out")
         return true
     }
 
@@ -434,6 +498,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_FINDER -> { finderMode = !finderMode; rebuild(); true }
+            MENU_MASTER_OFF -> { showMasterOff(); true }
             MENU_CLEAR_FAVS -> { clearFavourites(); true }
             MENU_RECONNECT -> { connect(); true }
             MENU_SIGN_OUT -> { prefs.clear(); goToOnboarding(); true }
@@ -478,9 +543,10 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
 
     companion object {
         private const val MENU_FINDER = 1
-        private const val MENU_CLEAR_FAVS = 2
-        private const val MENU_RECONNECT = 3
-        private const val MENU_SIGN_OUT = 4
+        private const val MENU_MASTER_OFF = 2
+        private const val MENU_CLEAR_FAVS = 3
+        private const val MENU_RECONNECT = 4
+        private const val MENU_SIGN_OUT = 5
         private const val STEP = 5
         private val BG = 0xFF121212.toInt()
     }

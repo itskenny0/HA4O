@@ -23,7 +23,7 @@ class ControlsTest {
         assertEquals(Kind.LightBrightnessTemp, Controls.describe(entity("light.k")).kind)
         assertEquals(Kind.CoverPosition, Controls.describe(entity("cover.garage")).kind)
         assertEquals(Kind.FanPercent, Controls.describe(entity("fan.office")).kind)
-        assertEquals(Kind.Volume, Controls.describe(entity("media_player.tv")).kind)
+        assertEquals(Kind.Media, Controls.describe(entity("media_player.tv")).kind)
         assertEquals(Kind.Toggle, Controls.describe(entity("switch.fan")).kind)
         assertEquals(Kind.Toggle, Controls.describe(entity("input_boolean.guest")).kind)
         assertEquals(Kind.Toggle, Controls.describe(entity("automation.night")).kind)
@@ -31,6 +31,20 @@ class ControlsTest {
         assertEquals(Kind.FireOnce, Controls.describe(entity("script.bedtime")).kind)
         assertEquals(Kind.ReadOnly, Controls.describe(entity("sensor.temp")).kind)
         assertEquals(Kind.ReadOnly, Controls.describe(entity("binary_sensor.door")).kind)
+    }
+
+    @Test fun maps_the_richer_domains() {
+        assertEquals(Kind.Climate, Controls.describe(entity("climate.house")).kind)
+        assertEquals(Kind.Lock, Controls.describe(entity("lock.front")).kind)
+        assertEquals(Kind.Vacuum, Controls.describe(entity("vacuum.robi")).kind)
+        assertEquals(Kind.Select, Controls.describe(entity("input_select.mode")).kind)
+        assertEquals(Kind.Select, Controls.describe(entity("select.source")).kind)
+        assertEquals(Kind.NumberStepper, Controls.describe(entity("input_number.temp")).kind)
+        assertEquals(Kind.NumberStepper, Controls.describe(entity("number.bri")).kind)
+        assertEquals(Kind.ButtonPress, Controls.describe(entity("input_button.go")).kind)
+        assertEquals(Kind.ButtonPress, Controls.describe(entity("button.restart")).kind)
+        assertEquals(Kind.TextInput, Controls.describe(entity("input_text.note")).kind)
+        assertEquals(Kind.TextInput, Controls.describe(entity("text.msg")).kind)
     }
 
     @Test fun controllable_means_not_read_only() {
@@ -133,5 +147,68 @@ class ControlsTest {
             Controls.ServiceCall("media_player", "media_play_pause", "media_player.tv"),
             Controls.playPause("media_player.tv"),
         )
+    }
+
+    @Test fun media_transport_and_mute() {
+        val id = "media_player.tv"
+        assertEquals(Controls.ServiceCall("media_player", "media_play", id), Controls.mediaPlay(id))
+        assertEquals(Controls.ServiceCall("media_player", "media_pause", id), Controls.mediaPause(id))
+        assertEquals(Controls.ServiceCall("media_player", "media_next_track", id), Controls.mediaNext(id))
+        assertEquals(Controls.ServiceCall("media_player", "media_previous_track", id), Controls.mediaPrevious(id))
+        assertEquals(true, Controls.setMuted(id, true).data["is_volume_muted"])
+        assertEquals("volume_mute", Controls.setMuted(id, true).service)
+    }
+
+    @Test fun light_rgb_colour() {
+        val call = Controls.setRgb("light.k", 255, 128, 0)
+        assertEquals("light", call.domain)
+        assertEquals("turn_on", call.service)
+        assertEquals(listOf(255, 128, 0), call.data["rgb_color"])
+    }
+
+    @Test fun cover_tilt() {
+        assertEquals(30, Controls.setCoverTilt("cover.blind", 30).data["tilt_position"])
+        assertEquals("set_cover_tilt_position", Controls.setCoverTilt("cover.blind", 30).service)
+        assertEquals(Controls.ServiceCall("cover", "open_cover_tilt", "cover.blind"), Controls.openCoverTilt("cover.blind"))
+        assertEquals(Controls.ServiceCall("cover", "close_cover_tilt", "cover.blind"), Controls.closeCoverTilt("cover.blind"))
+    }
+
+    @Test fun climate_temperature_and_mode() {
+        val call = Controls.setClimateTemperature("climate.house", 21.5)
+        assertEquals(Controls.ServiceCall("climate", "set_temperature", "climate.house", mapOf("temperature" to 21.5)), call)
+        assertEquals(
+            Controls.ServiceCall("climate", "set_hvac_mode", "climate.house", mapOf("hvac_mode" to "heat")),
+            Controls.setHvacMode("climate.house", "heat"),
+        )
+    }
+
+    @Test fun lock_and_vacuum() {
+        assertEquals(Controls.ServiceCall("lock", "lock", "lock.front"), Controls.lock("lock.front"))
+        assertEquals(Controls.ServiceCall("lock", "unlock", "lock.front"), Controls.unlock("lock.front"))
+        assertEquals(Controls.ServiceCall("vacuum", "start", "vacuum.r"), Controls.vacuumStart("vacuum.r"))
+        assertEquals(Controls.ServiceCall("vacuum", "pause", "vacuum.r"), Controls.vacuumPause("vacuum.r"))
+        assertEquals(Controls.ServiceCall("vacuum", "return_to_base", "vacuum.r"), Controls.vacuumReturn("vacuum.r"))
+    }
+
+    @Test fun helper_builders_use_the_entitys_own_domain() {
+        assertEquals(Controls.ServiceCall("input_number", "set_value", "input_number.t", mapOf("value" to 4.0)),
+            Controls.setNumberValue("input_number.t", 4.0))
+        assertEquals(Controls.ServiceCall("number", "set_value", "number.t", mapOf("value" to 4.0)),
+            Controls.setNumberValue("number.t", 4.0))
+        assertEquals(Controls.ServiceCall("input_select", "select_option", "input_select.m", mapOf("option" to "Day")),
+            Controls.selectOption("input_select.m", "Day"))
+        assertEquals(Controls.ServiceCall("input_button", "press", "input_button.g"), Controls.press("input_button.g"))
+        assertEquals(Controls.ServiceCall("input_text", "set_value", "input_text.n", mapOf("value" to "hi")),
+            Controls.setText("input_text.n", "hi"))
+    }
+
+    @Test fun stepped_number_rounds_to_step_and_clamps() {
+        assertEquals(5.0, Controls.steppedNumber(4.0, +1, min = 0.0, max = 10.0, step = 1.0), 1e-9)
+        assertEquals(3.0, Controls.steppedNumber(4.0, -1, min = 0.0, max = 10.0, step = 1.0), 1e-9)
+        // Snaps an off-grid current value onto the step grid before stepping.
+        assertEquals(21.5, Controls.steppedNumber(21.3, +1, min = 7.0, max = 35.0, step = 0.5), 1e-9)
+        // Clamps at the bounds.
+        assertEquals(0.0, Controls.steppedNumber(0.0, -1, min = 0.0, max = 10.0, step = 1.0), 1e-9)
+        assertEquals(10.0, Controls.steppedNumber(10.0, +1, min = 0.0, max = 10.0, step = 1.0), 1e-9)
     }
 }
