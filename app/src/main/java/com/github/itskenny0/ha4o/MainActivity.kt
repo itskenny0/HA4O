@@ -161,7 +161,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         emptyState = TextView(this)
         emptyState.gravity = Gravity.CENTER
         emptyState.setTextColor(0xFF9E9E9E.toInt())
-        emptyState.text = "THIS TAB IS EMPTY\n\nopen All entities (menu) and long-press to add cards"
+        emptyState.text = "THIS TAB IS EMPTY\n\ntap ☆ above, then long-press an entity to add it here"
         emptyState.visibility = View.GONE
         content.addView(emptyState, fill())
 
@@ -179,7 +179,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     /** The "All entities" finder: a search box above a filtered flat list. */
     private fun buildFinderPanel(): View {
         finderSearch = EditText(this)
-        finderSearch.hint = "Search entities"
+        finderSearch.hint = "Search — long-press a result to add to a tab"
         finderSearch.setSingleLine(true)
         finderSearch.setTextColor(Color.WHITE)
         finderSearch.setHintTextColor(0xFF777777.toInt())
@@ -194,7 +194,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         finderList = ListView(this)
         // finderList.adapter is assigned by rebuild() (so it tracks the active page).
         finderList.setOnItemClickListener { _, _, pos, _ -> onFinderTapped(finderItems[pos]) }
-        finderList.setOnItemLongClickListener { _, _, pos, _ -> toggleOnPage(finderItems[pos]); true }
+        finderList.setOnItemLongClickListener { _, _, pos, _ -> showFinderMenu(finderItems[pos]); true }
 
         finderPanel = LinearLayout(this)
         finderPanel.orientation = LinearLayout.VERTICAL
@@ -239,7 +239,9 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         position.setTextColor(0xFF9E9E9E.toInt())
         bar.addView(position, wrap())
 
-        bar.addView(barButton("＋") { addTab() }, wrap())
+        // Open the favourites picker (All entities). On-screen so it works on devices with
+        // no hardware menu key.
+        bar.addView(barButton("☆") { openPicker() }, wrap())
         return bar
     }
 
@@ -312,6 +314,12 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     }
 
     private fun openSettings() = startActivity(Intent(this, SettingsActivity::class.java))
+
+    /** Open the favourites picker (the "All entities" finder), focused for adding cards. */
+    private fun openPicker() {
+        finderMode = true
+        rebuild()
+    }
 
     /** Per-entity override editor: custom name, glyph, and card colour. */
     private fun showCustomize(entity: EntityState) {
@@ -462,6 +470,45 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         toast(if (onPage) "Removed ${entity.displayName}" else "Added ${entity.displayName} to ${activePage().name}")
     }
 
+    private fun removeFromPage(entity: EntityState) {
+        pages = Pages.removeEntity(pages, activePageId, entity.entityId)
+        savePages()
+        rebuild()
+        toast("Removed ${entity.displayName}")
+    }
+
+    /** Long-press on a card: a menu, so a card is never removed by accident. */
+    private fun showCardMenu(entity: EntityState) {
+        val items = arrayOf("More info", "Customize…", "Remove from \"${activePage().name}\"")
+        AlertDialog.Builder(this)
+            .setTitle(entity.displayName)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showMoreInfo(entity)
+                    1 -> showCustomize(entity)
+                    2 -> removeFromPage(entity)
+                }
+            }
+            .show()
+    }
+
+    /** Long-press in the picker: add/remove from the active page, or drill in. */
+    private fun showFinderMenu(entity: EntityState) {
+        val onPage = activePage().ids.contains(entity.entityId)
+        val toggleLabel = if (onPage) "Remove from \"${activePage().name}\"" else "Add to \"${activePage().name}\""
+        val items = arrayOf(toggleLabel, "More info", "Customize…")
+        AlertDialog.Builder(this)
+            .setTitle(entity.displayName)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> toggleOnPage(entity)
+                    1 -> showMoreInfo(entity)
+                    2 -> showCustomize(entity)
+                }
+            }
+            .show()
+    }
+
     private fun updatePosition() {
         position.text = when {
             finderMode -> "${allEntities.size}"
@@ -498,7 +545,7 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
         socket?.callService(call)
     }
 
-    override fun onCardLongPress(entity: EntityState) = toggleOnPage(entity)
+    override fun onCardLongPress(entity: EntityState) = showCardMenu(entity)
 
     override fun onCardTap(entity: EntityState) = showMoreInfo(entity)
 
@@ -534,7 +581,11 @@ class MainActivity : Activity(), HaSocket.Listener, TabStrip.Listener, CardAdapt
     }
 
     override fun onBackPressed() {
-        if (moreInfoId != null) closeMoreInfo() else super.onBackPressed()
+        when {
+            moreInfoId != null -> closeMoreInfo()
+            finderMode -> { finderMode = false; rebuild() }
+            else -> super.onBackPressed()
+        }
     }
 
     // --- finder (flat "All entities") ---
